@@ -1,0 +1,13 @@
+{
+  "name": "JetiExBus",
+  "apiVersion": "1.0.0",
+  "author": "Markus Pfaff, P2L2.com",
+  "version": "0.0.1",
+  "description": "Decodes JETImodel EX Bus protocol",
+  "extensions": {
+    "JetiExBus": {
+      "type": "HighLevelAnalyzer",
+      "entryPoint": "HighLevelAnalyzer.Hla"
+    }
+  }
+}
