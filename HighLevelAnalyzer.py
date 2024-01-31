@@ -1,3 +1,4 @@
+
 # Jeti ExBus High Level Analyzer (EXBUS-HLA)
 # Copyright 2024, Markus Pfaff
 # For more information and documentation, please go to https://support.saleae.com/extensions/high-level-analyzer-extensions
@@ -45,12 +46,17 @@ class Hla(HighLevelAnalyzer):
         jetibox_packet = 3
         unknown_packet = 4
 
-    class dec_fsm_ex_tlm_e(enum.Enum):
+    class extlm_dec_fsm_e(enum.Enum):
         extlm_idle = 1
-        extlm_start_byte_rcvd = 2
+        extlm_first_data_byte = 2
+        extlm_first_data_consumed = 3
 
-        extlm_crc8 = 10
+    class extlm_packet_type_e(enum.Enum):
+        extlm_type_text = 0
+        extlm_type_data = 1
+        extlm_type_message = 2
 
+  
     # Protocol defines for master frames
     EXBUS_START_BYTE_MSTR_CH_DATA = b'\x3e'
     EXBUS_START_BYTE_MSTR_TLM_REQ = b'\x3d'
@@ -78,7 +84,19 @@ class Hla(HighLevelAnalyzer):
     EXTLM_MANUFACTURER_ID_POS = 3
     EXTLM_DEVICE_ID_POS = 5
     EXTLM_RESERVED_BYTE_POS = 7
-
+    EXTLM_FIRST_ENTRY_POS = 8
+    EXTLM_DATA_TYPE_6b = 0
+    EXTLM_DATA_TYPE_6b_LEN = 1
+    EXTLM_DATA_TYPE_14b = 1
+    EXTLM_DATA_TYPE_14b_LEN = 2
+    EXTLM_DATA_TYPE_22b = 4
+    EXTLM_DATA_TYPE_22b_LEN = 3
+    EXTLM_DATA_TYPE_TIMEDATE = 5
+    EXTLM_DATA_TYPE_TIMEDATE_LEN = 3
+    EXTLM_DATA_TYPE_30b = 8
+    EXTLM_DATA_TYPE_30b_LEN = 4
+    EXTLM_DATA_TYPE_GPS = 9
+    EXTLM_DATA_TYPE_GPS_LEN = 4
 
 
     exbus_STOP_SYNC_BYTE = b'\x00'  # 0x00
@@ -86,13 +104,19 @@ class Hla(HighLevelAnalyzer):
     def __init__(self):
 
         # Initialize HLA.
+        # String to decorate the tags above the waveform in Saleae Logic2
+        self.tag_str = ('')
         self.exbus_frame_start = None  # Timestamp: Start of frame
         self.exbus_frame_end = None  # Timestamp: End of frame
         self.dec_fsm = self.dec_fsm_e.idle  # Current state of protocol decoder FSM
         self.packet_type = self.packet_type_e.channel_value_packet
         self.exbus_packet_length = 0 # Length of overall packet in nr of bytes
         self.exbus_frame_current_index = 0  # Index to determine end of payload
+        self.extlm_dec_fsm = self.extlm_dec_fsm_e.extlm_idle # We need an FSM to decide where we are in decoding extlm
         self.extlm_packet_length = 0 # Length of the EX telemtry packet content
+        self.extlm_type = self.extlm_packet_type_e.extlm_type_text # The kind of data is transported in EX sub packet
+        self.extlm_entry_idx = 0 # The index used for a single data entry (1 to 4 bytes)
+        self.extlm_entry_length = 0 # Number of bytes for a single data entry (1 to 4 bytes)
         self.exbus_payload = []  # Stores the payload for decoding after last byte ist rx'd.
         self.exbus_block_length = 0 # length of the block currently under decoding
         self.exbus_block_byte_idx = 0 # Index onto current data byte in block
@@ -233,7 +257,7 @@ class Hla(HighLevelAnalyzer):
               payload = int.from_bytes(frame.data['data'], byteorder='big')
               if self.exbus_block_byte_idx <= self.exbus_block_length:
                  print('Processing EX telemetry sub packet')
-                 #print(hex(payload))
+                 print(hex(payload))
                  #print(self.exbus_block_byte_idx, self.exbus_block_length)
                  if self.exbus_block_byte_idx == self.EXTLM_START_BYTE_POS and payload&0x0F == self.EXTLM_START_BYTE:
                     return AnalyzerFrame('ExTlmStart', frame.start_time, frame.end_time, {})
@@ -242,11 +266,19 @@ class Hla(HighLevelAnalyzer):
                     print(self.extlm_packet_length)
                     if payload>>6 == self.EXTLM_PKG_TYPE_TEXT:
                        print('EX text telemetry packet encountered')
+                       self.extlm_type = self.extlm_packet_type_e.extlm_type_text
+                       self.tag_str = ('{}').format(self.extlm_packet_length)
+                       return AnalyzerFrame('Txt', frame.start_time, frame.end_time, {'Len': self.tag_str})
                     if payload>>6 == self.EXTLM_PKG_TYPE_DATA:
                        print('EX data telemetry packet encountered')
+                       self.extlm_type = self.extlm_packet_type_e.extlm_type_data
+                       self.tag_str = ('{}').format(self.extlm_packet_length)
+                       return AnalyzerFrame('Data', frame.start_time, frame.end_time, {'Len': self.tag_str})
                     if payload>>6 == self.EXTLM_PKG_TYPE_MESSAGE:
                        print('EX message telemetry packet encountered')
-                    return AnalyzerFrame('Type&Len', frame.start_time, frame.end_time, {})
+                       self.extlm_type = self.extlm_packet_type_e.extlm_type_message
+                       self.tag_str = ('{}').format(self.extlm_packet_length)
+                       return AnalyzerFrame('Msg', frame.start_time, frame.end_time, {'Len': self.tag_str})
                  elif self.exbus_block_byte_idx == self.EXTLM_MANUFACTURER_ID_POS:
                     self.exbus_block_start = frame.start_time
                  elif self.exbus_block_byte_idx == self.EXTLM_MANUFACTURER_ID_POS+1:
@@ -256,7 +288,33 @@ class Hla(HighLevelAnalyzer):
                  elif self.exbus_block_byte_idx == self.EXTLM_DEVICE_ID_POS+1:
                     return AnalyzerFrame('DeviceID', self.exbus_block_start, frame.end_time, {})
                  elif self.exbus_block_byte_idx == self.EXTLM_RESERVED_BYTE_POS:
+                    # Prepare for the first data entry
+                    self.extlm_dec_fsm = self.extlm_dec_fsm_e.extlm_first_data_byte
+                    self.extlm_entry_idx = 0
                     return AnalyzerFrame('Reserved', frame.start_time, frame.end_time, {})
+                 elif self.exbus_block_byte_idx >= self.EXTLM_FIRST_ENTRY_POS and self.exbus_block_byte_idx < self.exbus_block_length:
+                    self.extlm_entry_idx += 1
+                    if self.extlm_type == self.extlm_packet_type_e.extlm_type_data:
+                       if self.extlm_entry_idx == 1:
+                          self.exbus_block_start = frame.start_time
+                          if payload&0b00001111 == self.EXTLM_DATA_TYPE_6b:
+                             self.extlm_entry_length = self.EXTLM_DATA_TYPE_6b_LEN
+                          elif payload&0b00001111 == self.EXTLM_DATA_TYPE_14b:
+                             self.extlm_entry_length = self.EXTLM_DATA_TYPE_14b_LEN
+                          elif payload&0b00001111 == self.EXTLM_DATA_TYPE_22b:
+                             self.extlm_entry_length = self.EXTLM_DATA_TYPE_22b_LEN
+                          print('First data entry encountered')
+                          self.tag_str = ('ID:{}, type:{}, len:{}').format(hex(payload>>4),payload&0b00001111, self.extlm_entry_length)
+                          print (self.tag_str)
+                       if self.extlm_entry_idx == self.extlm_entry_length:
+                          # Last byte of data entry
+                          self.extlm_entry_idx = 0
+                          return AnalyzerFrame('Data', self.exbus_block_start, frame.end_time, {'Data': self.tag_str})
+                       else:
+                          # one of the middle bytes of data entry
+                          return None
+                    
+
                  elif self.exbus_block_byte_idx == self.exbus_block_length:
                     # Last byte of this block
                     if self.exbus_frame_current_index == self.exbus_packet_length - 2:
