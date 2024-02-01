@@ -31,3 +31,7 @@ Copyright 2024, Markus Pfaff, [P2L2 GmbH, Austria](https://www.p2l2.com/)
 * Message packets
 * JetiBox packets
 * Simple text messages
+
+## Notes
+
+You may find example Salea sessions in the capture folder.
