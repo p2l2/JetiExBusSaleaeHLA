@@ -3,6 +3,18 @@
 # Copyright 2024, Markus Pfaff
 # For more information and documentation, please go to https://support.saleae.com/extensions/high-level-analyzer-extensions
 
+# ToDo
+# The information returned to the calling low level analyzer by
+#   return AnalyzerFrame('Pkt', frame.start_time, frame.end_time, {'l': self.tag_str})
+# was not used as intended by Saleae insofar as the data structure at the end of the
+# statement is a python dictionary
+# This enables statements like this:
+#   return AnalyzerFrame('Pkt', frame.start_time, frame.end_time, {
+#      'l': self.some_length_str, 'wisdom': self.some_wisdom_str, 'truth': self.some_truth_str})
+# This populates the data table in the Saleae Logic2 window with the according columns
+# where the header of a column is the dictionary key string.
+
+
 import enum
 from saleae.analyzers import HighLevelAnalyzer, AnalyzerFrame, StringSetting, NumberSetting, ChoicesSetting
 
